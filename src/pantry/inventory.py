@@ -103,3 +103,78 @@ def read_staples(pantry_file: Path) -> list[str]:
             staples.append(name.lower())
 
     return staples
+
+
+def add_items(pantry: Pantry, items: list[PantryItem]) -> Pantry:
+    """Add items to the pantry, skipping duplicates (case-insensitive).
+
+    Items already in the pantry (case-insensitive match) are skipped.
+    Returns a NEW Pantry instance — this function is pure.
+
+    Args:
+        pantry: Current Pantry inventory.
+        items: List of PantryItems to add.
+
+    Returns:
+        New Pantry with duplicate-free items appended.
+    """
+    existing_names = {p.name.lower() for p in pantry.items}
+    new_items = [
+        item for item in items
+        if item.name.lower() not in existing_names
+    ]
+    return Pantry(items=list(pantry.items) + new_items)
+
+
+def write_pantry(pantry_file: Path, pantry: Pantry, categories: list[GroceryCategory], infer_category=None) -> None:
+    """Write a Pantry to a Markdown file, creating it if needed.
+
+    Creates the file with category section headers if it doesn't exist.
+    Categories with no items are omitted from output.
+
+    Args:
+        pantry_file: Path to pantry-items.md.
+        pantry: Pantry object to write.
+        categories: Ordered list of GroceryCategory enums for section ordering.
+        infer_category: Optional callable(str) -> GroceryCategory. If provided,
+            items without a location will be categorized using this function.
+    """
+    # Group items by category, inferring as needed
+    grouped: dict[GroceryCategory, list[PantryItem]] = {cat: [] for cat in categories}
+    grouped[GroceryCategory.OTHER] = []
+
+    for item in pantry.items:
+        cat = GroceryCategory.OTHER
+        if infer_category:
+            cat = infer_category(item.name)
+        if cat not in grouped:
+            grouped[cat] = []
+        grouped[cat].append(item)
+
+    # Build the emoji map
+    _EMOJI: dict[GroceryCategory, str] = {
+        GroceryCategory.DAIRY: "🧀",
+        GroceryCategory.PRODUCE: "🥬",
+        GroceryCategory.BAKERY: "🛒",
+        GroceryCategory.PANTRY: "🍚",
+        GroceryCategory.CONDIMENTS: "🥫",
+        GroceryCategory.SNACKS: "🥜",
+        GroceryCategory.BEVERAGES: "☕",
+        GroceryCategory.MEAT_SEAFOOD: "🥩",
+        GroceryCategory.FROZEN: "❄️",
+        GroceryCategory.OTHER: "📦",
+    }
+
+    lines = ["# Pantry Items", '', "*Items you already have at home — these will be excluded from grocery lists.*", '', "---", '']
+
+    for cat in categories:
+        cat_items = grouped.get(cat, [])
+        if not cat_items:
+            continue
+        emoji = _EMOJI.get(cat, "📦")
+        lines.append(f"## {emoji} {cat.value}")
+        for item in sorted(cat_items, key=lambda i: i.name.lower()):
+            lines.append(f"- {item.name}")
+        lines.append('')
+
+    pantry_file.write_text("\n".join(lines).rstrip() + "\n")
