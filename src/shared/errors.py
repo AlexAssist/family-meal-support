@@ -15,6 +15,15 @@ class RecipeNotFoundError(MealSupportError):
         super().__init__(f"Recipe not found: {name}")
 
 
+class MultipleCandidatesError(MealSupportError):
+    """Multiple recipes match the search term."""
+
+    def __init__(self, name: str, candidates: list[str]) -> None:
+        self.name = name
+        self.candidates = candidates
+        super().__init__(f"Multiple recipes match '{name}': {', '.join(candidates)}")
+
+
 class SheetSyncError(MealSupportError):
     """Google Sheets read/write failed."""
 

@@ -89,9 +89,51 @@ def _next_day(current: date) -> date:
     )
 
 
+# -------------------------------------------------------------------
+# Day-of-week names for formatting
+# -------------------------------------------------------------------
+_DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+
+def _format_day(date: date, recipe_name: str, recipe_link: str | None) -> str:
+    """Format a single day section for a plan file."""
+    day_name = _DAY_NAMES[date.weekday()]
+    month_day = f"{day_name} {date.strftime('%B %-d')}"
+
+    # Build the **Supper:** line value
+    if recipe_name.strip():
+        if recipe_link:
+            supper_value = f"[{recipe_name}]({recipe_link})"
+        else:
+            supper_value = recipe_name
+    else:
+        supper_value = ""
+
+    return f"""## {month_day}
+**Supper:** {supper_value}
+🧊 Defrost: | 🔪 Prep:
+"""
+
+
 def write_meal_plan(plan: MealPlan, plan_file: Path) -> None:
     """Write a MealPlan to a Markdown file.
 
     Raises PantryError if the file cannot be written.
     """
-    raise NotImplementedError("write_meal_plan not yet implemented")
+    # Header
+    header = f"# Week of {plan.week_start.strftime('%B %-d, %Y')}\n"
+
+    # Day sections
+    days_text = "".join(
+        _format_day(day.date, day.recipe_name, day.recipe_link)
+        for day in plan.days
+    )
+
+    # Footer
+    footer = f"\n---\n\n*Plan created {date.today().strftime('%Y-%m-%d')}*\n"
+
+    text = header + days_text + footer
+
+    # Ensure directory exists
+    plan_file.parent.mkdir(parents=True, exist_ok=True)
+    plan_file.write_text(text)
