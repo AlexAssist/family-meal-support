@@ -1,9 +1,15 @@
 """Read and write meal plans from Obsidian Markdown files."""
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 import re
 
 from meal_plan import MealPlan, PlannedMeal
+
+
+_DEFROST_PREP_PATTERN = re.compile(
+    r"🧊\s*Defrost:\s*(.*?)\s*\|\s*🔪\s*Prep:\s*(.*)",
+    re.IGNORECASE,
+)
 
 
 def read_meal_plan(plan_file: Path) -> MealPlan | None:
@@ -41,14 +47,24 @@ def _parse_plan_file(filename: str, text: str) -> MealPlan:
     sections.pop(0)
 
     for section in sections:
-        # Find the **Supper:** line within this day's section.
-        # Defrost/prep rows are on their own lines — ignore them.
+        # Find the **Supper:** line and parse defrost/prep from section
         raw = ""
+        defrost: str | None = None
+        prep: str | None = None
         for line in section.split("\n"):
-            if line.startswith("**Supper:**"):
+            line_stripped = line.strip()
+            if line_stripped.startswith("**Supper:**"):
                 # Take only the content on this same line (not subsequent rows)
-                raw = line.split("**Supper:**", 1)[1].strip()
-                break
+                raw = line_stripped.split("**Supper:**", 1)[1].strip()
+            elif _DEFROST_PREP_PATTERN.match(line_stripped):
+                m = _DEFROST_PREP_PATTERN.match(line_stripped)
+                def_text = m.group(1).strip()
+                prep_text = m.group(2).strip()
+                if def_text and def_text != "None":
+                    defrost = def_text
+                if prep_text and prep_text != "None":
+                    prep = prep_text
+
         recipe_name, recipe_link = _parse_supper_line(raw)
 
         days.append(
@@ -56,9 +72,10 @@ def _parse_plan_file(filename: str, text: str) -> MealPlan:
                 date=current_date,
                 recipe_name=recipe_name,
                 recipe_link=recipe_link,
+                defrost_reminder=defrost,
+                prep_reminder=prep,
             )
         )
-        # Advance to next day (skip weekends for a 5-day plan, or just increment)
         current_date = _next_day(current_date)
 
     return MealPlan(week_start=week_start, days=days)
@@ -82,11 +99,7 @@ def _parse_supper_line(raw: str) -> tuple[str, str | None]:
 
 def _next_day(current: date) -> date:
     """Advance one day."""
-    return date(
-        current.year,
-        current.month,
-        current.day + 1,
-    )
+    return current + timedelta(days=1)
 
 
 # -------------------------------------------------------------------
@@ -95,7 +108,9 @@ def _next_day(current: date) -> date:
 _DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
 
-def _format_day(date: date, recipe_name: str, recipe_link: str | None) -> str:
+def _format_day(
+    date: date, recipe_name: str, recipe_link: str | None, defrost: str | None, prep: str | None
+) -> str:
     """Format a single day section for a plan file."""
     day_name = _DAY_NAMES[date.weekday()]
     month_day = f"{day_name} {date.strftime('%B %-d')}"
@@ -109,9 +124,12 @@ def _format_day(date: date, recipe_name: str, recipe_link: str | None) -> str:
     else:
         supper_value = ""
 
+    defrost_val = defrost if defrost else ""
+    prep_val = prep if prep else ""
+
     return f"""## {month_day}
 **Supper:** {supper_value}
-🧊 Defrost: | 🔪 Prep:
+🧊 Defrost: {defrost_val} | 🔪 Prep: {prep_val}
 """
 
 
@@ -125,7 +143,7 @@ def write_meal_plan(plan: MealPlan, plan_file: Path) -> None:
 
     # Day sections
     days_text = "".join(
-        _format_day(day.date, day.recipe_name, day.recipe_link)
+        _format_day(day.date, day.recipe_name, day.recipe_link, day.defrost_reminder, day.prep_reminder)
         for day in plan.days
     )
 
