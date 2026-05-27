@@ -7,18 +7,18 @@ from enum import Enum
 from typing import Annotated
 
 
-class GroceryCategory(Enum):
-    """Grocery store layout categories."""
+class GroceryCategory(str, Enum):
+    """Grocery store layout categories — ADR-001."""
 
+    DAIRY = "Dairy / Refrigerated"
     PRODUCE = "Produce"
-    DAIRY = "Dairy & Eggs"
     MEAT_SEAFOOD = "Meat & Seafood"
-    BAKERY = "Bakery & Bread"
-    PANTRY = "Pantry & Dry Goods"
+    BAKERY = "Bakery / Bread"
+    PANTRY = "Pantry / Dry Goods"
     FROZEN = "Frozen"
-    BEVERAGES = "Beverages"
-    CONDIMENTS = "Condiments & Sauces"
-    HOUSEHOLD = "Household & Cleaning"
+    CONDIMENTS = "Condiments / Sauces"
+    SNACKS = "Snacks"
+    BEVERAGES = "Beverages / Other"
     OTHER = "Other"
 
 
