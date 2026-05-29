@@ -109,3 +109,57 @@ class Pantry:
     """The household pantry inventory."""
 
     items: list[PantryItem] = field(default_factory=list)
+
+
+class Confidence(str, Enum):
+    """Confidence level for photo-analysis results.
+
+    Derived from the image model's self-reported confidence score:
+    - HIGH:    >= 80% — definitely visible, label clearly legible
+    - MEDIUM:  60-79% — visible but uncertain (partially obscured, ambiguous)
+    - LOW:     < 60%  — guess territory, shown as [?] in Discord output
+    """
+
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+    @classmethod
+    def from_score(cls, score: float) -> Confidence:
+        """Convert a 0.0-1.0 confidence score to a Confidence level."""
+        if score >= 0.80:
+            return cls.HIGH
+        elif score >= 0.60:
+            return cls.MEDIUM
+        else:
+            return cls.LOW
+
+
+class ItemStatus(str, Enum):
+    """Whether an item is already in the pantry or is a new find."""
+
+    NEW = "new"                  # Not currently in pantry — ➕ in Discord
+    ALREADY_IN_PANTRY = "already_in_pantry"  # Already listed — ✅ in Discord
+
+
+@dataclass(frozen=True)
+class SuggestedItem:
+    """A single item surfaced by photo analysis."""
+
+    name: str
+    confidence: Confidence
+    status: ItemStatus
+    category: GroceryCategory = GroceryCategory.OTHER
+    quantity: str | None = None  # e.g. "3", "half carton", "large bag"
+
+
+@dataclass(frozen=True)
+class PantrySuggestion:
+    """Result of photo-based pantry review.
+
+    Produced by `analyze_pantry_photos`. Passed to the confirmation
+    flow and eventually applied to pantry-items.md.
+    """
+
+    items: list[SuggestedItem] = field(default_factory=list)
+    unclear_photos: list[str] = field(default_factory=list)  # URLs that were uninterpretable
