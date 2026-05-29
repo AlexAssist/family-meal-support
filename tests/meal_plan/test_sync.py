@@ -27,7 +27,7 @@ class FakeSheetsClient:
     def __init__(self) -> None:
         self._written_plans: list[MealPlan] = []
         self._read_plans: list[MealPlan] = []
-        self._spreadsheet_id = "fake-sheet-id"
+        self.spreadsheet_id = "fake-sheet-id"
 
     def write_meal_plan(self, plan: MealPlan, tab_name: str = "Meal Plan") -> None:
         self._written_plans.append(plan)

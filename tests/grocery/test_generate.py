@@ -289,13 +289,26 @@ def test_missing_staples_added(store_one_recipe, empty_pantry):
     plan = MealPlan(week_start=date(2026, 6, 1), days=[
         PlannedMeal(date=date(2026, 6, 1), recipe_name="Chicken Tacos"),
     ])
-    result = generate_grocery_list(plan, pantry, store_one_recipe)
+    staples = ["eggs", "butter", "milk", "bread"]
+    result = generate_grocery_list(plan, pantry, store_one_recipe, staples=staples)
 
-    # Staples not in pantry should be added
-    # Salt and pepper are always staples — check if they appear
-    item_names_lower = [i.name.lower() for i in result.items]
-    # Staples from pantry-items.md that aren't in the plan should be added
-    # We expect salt, pepper, etc. — exact list from the staples definition
-    # For now just verify the list has items with source_recipe == "staples"
+    # Eggs and butter are in pantry → not added
+    # Milk and bread are missing from pantry → should be added
     staple_items = [i for i in result.items if i.source_recipe == "staples"]
-    assert len(staple_items) > 0
+    assert len(staple_items) == 2
+    staple_names = {i.name.lower() for i in staple_items}
+    assert "milk" in staple_names
+    assert "bread" in staple_names
+    assert "eggs" not in staple_names
+    assert "butter" not in staple_names
+
+
+def test_no_staples_when_none_provided(store_one_recipe, empty_pantry):
+    """When staples is None, no staples are added to the grocery list."""
+    plan = MealPlan(week_start=date(2026, 6, 1), days=[
+        PlannedMeal(date=date(2026, 6, 1), recipe_name="Chicken Tacos"),
+    ])
+    result = generate_grocery_list(plan, empty_pantry, store_one_recipe)
+
+    staple_items = [i for i in result.items if i.source_recipe == "staples"]
+    assert len(staple_items) == 0

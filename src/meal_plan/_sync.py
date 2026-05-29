@@ -114,7 +114,7 @@ def sync_push(
         last_push=now,
         last_pull=existing.last_pull if existing else None,
         last_push_hash=_meal_plan_hash(plan),
-        sheet_id=sheets_client._spreadsheet_id,  # noqa: SLF001
+        sheet_id=sheets_client.spreadsheet_id,
     )
     _save_meta(plans_dir, meta)
 
@@ -177,7 +177,7 @@ def confirm_pull(
         last_push=existing.last_push if existing else None,
         last_pull=now,
         last_push_hash=_meal_plan_hash(sheet_plan),
-        sheet_id=sheets_client._spreadsheet_id,  # noqa: SLF001
+        sheet_id=sheets_client.spreadsheet_id,
     )
     _save_meta(plans_dir, meta)
 

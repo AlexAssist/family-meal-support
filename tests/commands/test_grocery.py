@@ -135,7 +135,7 @@ class TestGroceryGenerate:
         # Mock the sheets client
         mock_client = MagicMock()
 
-        with patch("commands.grocery._get_sheets_client", return_value=mock_client), \
+        with patch("sheets.auth.SheetsAuth.build", return_value=mock_client), \
              patch("commands.grocery.generate_grocery_list", return_value=mock_grocery_list):
             msg = handle_grocery_generate(vault, plans_dir, pantry_file)
 

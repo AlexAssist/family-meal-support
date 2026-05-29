@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from pantry._categorize import infer_category as _infer_category
 from shared.types import GroceryCategory, Pantry, PantryItem
 
 
@@ -126,27 +127,25 @@ def add_items(pantry: Pantry, items: list[PantryItem]) -> Pantry:
     return Pantry(items=list(pantry.items) + new_items)
 
 
-def write_pantry(pantry_file: Path, pantry: Pantry, categories: list[GroceryCategory], infer_category=None) -> None:
+def write_pantry(pantry_file: Path, pantry: Pantry, categories: list[GroceryCategory]) -> None:
     """Write a Pantry to a Markdown file, creating it if needed.
 
     Creates the file with category section headers if it doesn't exist.
     Categories with no items are omitted from output.
 
+    Items are categorized automatically using pantry._categorize.infer_category().
+
     Args:
         pantry_file: Path to pantry-items.md.
         pantry: Pantry object to write.
         categories: Ordered list of GroceryCategory enums for section ordering.
-        infer_category: Optional callable(str) -> GroceryCategory. If provided,
-            items without a location will be categorized using this function.
     """
     # Group items by category, inferring as needed
     grouped: dict[GroceryCategory, list[PantryItem]] = {cat: [] for cat in categories}
     grouped[GroceryCategory.OTHER] = []
 
     for item in pantry.items:
-        cat = GroceryCategory.OTHER
-        if infer_category:
-            cat = infer_category(item.name)
+        cat = _infer_category(item.name)
         if cat not in grouped:
             grouped[cat] = []
         grouped[cat].append(item)

@@ -9,9 +9,9 @@ import pytest
 
 from commands.doneshopping import (
     is_doneshopping_trigger,
-    _infer_category,
     handle_doneshopping,
 )
+from pantry._categorize import infer_category as _infer_category
 from pantry.inventory import read_pantry, add_items, write_pantry
 from shared.types import (
     GroceryCategory,
@@ -197,7 +197,7 @@ class TestWritePantry:
                 PantryItem(name="Tomatoes"),
             ])
             # Pass infer_category so items get sorted into their categories
-            write_pantry(pantry_file, pantry, categories, infer_category=_infer_category)
+            write_pantry(pantry_file, pantry, categories)
 
             text = pantry_file.read_text()
             # Milk → Dairy, Chicken → Meat, Tomatoes → Produce
@@ -232,11 +232,10 @@ def mock_sheets(monkeypatch):
         "Red Bell Pepper",
     ])
 
-    def fake_get_sheets_client(vault):
+    def fake_build():
         return mock_client
 
-    import commands.doneshopping as ds
-    monkeypatch.setattr(ds, "_get_sheets_client", fake_get_sheets_client)
+    monkeypatch.setattr("sheets.auth.SheetsAuth.build", fake_build)
 
 
 class TestHandleDoneshopping:
@@ -263,27 +262,29 @@ class TestHandleDoneshopping:
     def test_no_checked_items(self, mock_sheets):
         # Re-patch with empty list
         mock_client = MockSheetsClient(checked_items=[])
-        import commands.doneshopping as ds
-        original = ds._get_sheets_client
 
-        def fake_empty(vault):
+        import sheets.auth
+        original_build = sheets.auth.SheetsAuth.build
+
+        def fake_empty():
             return mock_client
 
         with tempfile.TemporaryDirectory() as tmpdir:
             pantry_file = Path(tmpdir) / "pantry-items.md"
             vault = Path(tmpdir) / "vault"
-            ds._get_sheets_client = fake_empty
+            sheets.auth.SheetsAuth.build = fake_empty
 
             try:
                 result = handle_doneshopping(pantry_file, vault)
                 assert "No items checked" in result
             finally:
-                ds._get_sheets_client = original
+                sheets.auth.SheetsAuth.build = original_build
 
     def test_all_items_already_in_pantry(self, mock_sheets):
         mock_client = MockSheetsClient(checked_items=["Eggs", "Butter"])
-        import commands.doneshopping as ds
-        original = ds._get_sheets_client
+
+        import sheets.auth
+        original_build = sheets.auth.SheetsAuth.build
 
         with tempfile.TemporaryDirectory() as tmpdir:
             pantry_file = Path(tmpdir) / "pantry-items.md"
@@ -296,13 +297,13 @@ class TestHandleDoneshopping:
             categories = list(GroceryCategory)
             write_pantry(pantry_file, existing_pantry, categories)
 
-            def fake_all_existing(vault):
+            def fake_all_existing():
                 return mock_client
 
-            ds._get_sheets_client = fake_all_existing
+            sheets.auth.SheetsAuth.build = fake_all_existing
             try:
                 result = handle_doneshopping(pantry_file, vault)
                 # All were in stock
                 assert "already in stock" in result or "were already" in result.lower()
             finally:
-                ds._get_sheets_client = original
+                sheets.auth.SheetsAuth.build = original_build

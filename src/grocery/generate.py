@@ -24,33 +24,6 @@ from recipes.lookup import RecipeStore
 
 
 # -------------------------------------------------------------------
-# Staples — baseline always-have items
-# If any of these are missing from the pantry, they get added to
-# the grocery list. Case-insensitive match against pantry items.
-# -------------------------------------------------------------------
-_STAPLES: list[str] = [
-    "salt",
-    "black pepper",
-    "shaoxing wine",
-    "chicken broth",
-    "soy sauce",
-    "garlic",
-    "garlic powder",
-    "green onions",
-    "ground chicken",
-    "light mayonnaise",
-    "minced ginger",
-    "small flour tortillas",
-    "sugar",
-    "garlic cloves",
-    "butter",
-    "eggs",
-    "milk",
-    "bread",
-]
-
-
-# -------------------------------------------------------------------
 # Public interface
 # -------------------------------------------------------------------
 
@@ -58,12 +31,13 @@ def generate_grocery_list(
     plan: MealPlan,
     pantry: Pantry,
     recipe_store: RecipeStore,
+    staples: list[str] | None = None,
 ) -> GroceryList:
     """Generate a complete, category-grouped grocery list from a meal plan.
 
-    Takes a meal plan, pantry inventory, and recipe store — and produces
-    a grocery list covering all ingredients needed for the week, minus
-    what you already have, plus any missing staples.
+    Takes a meal plan, pantry inventory, recipe store, and optional staples
+    list — and produces a grocery list covering all ingredients needed for
+    the week, minus what you already have, plus any missing staples.
 
     Processing pipeline (all private):
       1. Extract all ingredients from every planned recipe
@@ -76,6 +50,9 @@ def generate_grocery_list(
         plan: The weekly meal plan.
         pantry: Current pantry inventory.
         recipe_store: Source of Recipe objects for each planned meal.
+        staples: Optional list of staple item names. Staples not found
+            in the pantry are added to the grocery list. If None or
+            empty, no staples are added.
 
     Returns:
         GroceryList with items grouped and sorted.
@@ -104,7 +81,8 @@ def generate_grocery_list(
     filtered = [(n, ing) for n, ing in merged if n not in pantry_names]
 
     # 4. Add missing staples (only when there are planned meals)
-    staple_items = _build_staples_list(pantry_names)
+    staple_names = staples or []
+    staple_items = _build_staples_list(pantry_names, staple_names)
 
     # 5. Build GroceryItem list
     items: list[GroceryItem] = []
@@ -187,10 +165,10 @@ def _source_recipe(
     return None
 
 
-def _build_staples_list(pantry_names: set[str]) -> list[str]:
+def _build_staples_list(pantry_names: set[str], staples: list[str]) -> list[str]:
     """Return staples that are missing from pantry."""
     missing: list[str] = []
-    for staple in _STAPLES:
+    for staple in staples:
         if staple not in pantry_names:
             missing.append(staple)
     return missing

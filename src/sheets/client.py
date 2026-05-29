@@ -38,6 +38,11 @@ class SheetsClient:
         self._service = service
         self._spreadsheet_id = spreadsheet_id
 
+    @property
+    def spreadsheet_id(self) -> str:
+        """Public accessor for the spreadsheet ID."""
+        return self._spreadsheet_id
+
     # ------------------------------------------------------------------
     # Meal Plan
     # ------------------------------------------------------------------

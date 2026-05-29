@@ -11,8 +11,8 @@ from grocery.generate import generate_grocery_list
 from meal_plan import MealPlan
 from obsidian.vault import read_meal_plan
 from obsidian.recipes import ObsidianRecipeStore
-from pantry.inventory import read_pantry
-from sheets import SheetsClient
+from pantry.inventory import read_pantry, read_staples
+from sheets import SheetsAuth, SheetsClient
 from shared.errors import SheetSyncError
 
 # -------------------------------------------------------------------
@@ -66,7 +66,8 @@ def _build_grocery_list(
 
     pantry = read_pantry(pantry_file)
     store = ObsidianRecipeStore(vault / "reference" / "meal-planning" / "meals")
-    grocery_list = generate_grocery_list(plan, pantry, store)
+    staples = read_staples(pantry_file)
+    grocery_list = generate_grocery_list(plan, pantry, store, staples=staples)
     return plan, grocery_list.items
 
 
@@ -117,7 +118,7 @@ def handle_grocery_generate(
 
     # Write to Sheets
     try:
-        client = _get_sheets_client()
+        client = SheetsAuth.build()
     except SheetSyncError as e:
         return f"❌ Google Sheets error: {e.details}"
 
@@ -149,45 +150,3 @@ def handle_grocery_generate(
         msg += f"\n🔗 [Open Sheet]({sheet_url})"
 
     return msg
-
-
-# -------------------------------------------------------------------
-# Sheets auth (reused from sync.py — factored out later)
-# -------------------------------------------------------------------
-
-def _get_sheets_client() -> SheetsClient:
-    """Authenticate to Google Sheets and return a SheetsClient."""
-    import json
-
-    _CREDS_PATH = Path.expanduser("~/.config/family-meal-support/credentials.json")
-    _TOKEN_PATH = Path.expanduser("~/.config/family-meal-support/sheets-token.json")
-    _SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
-
-    if not _CREDS_PATH.exists():
-        raise SheetSyncError("auth", f"credentials.json not found at {_CREDS_PATH}")
-
-    creds = None
-    if _TOKEN_PATH.exists():
-        cred_data = json.loads(_TOKEN_PATH.read_text())
-        from google.oauth2.credentials import Credentials as CredsClass
-        creds = CredsClass.from_authorized_user_info(cred_data, _SCOPES)
-
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            from google.auth.transport.requests import Request
-            creds.refresh(Request())
-        else:
-            from google_auth_oauthlib.flow import InstalledAppFlow
-            flow = InstalledAppFlow.from_client_secrets_file(str(_CREDS_PATH), _SCOPES)
-            creds = flow.run_local_server(port=0)
-        _TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
-        _TOKEN_PATH.write_text(json.dumps(creds.to_json()))
-
-    from googleapiclient.discovery import build
-    service = build("sheets", "v4", credentials=creds)
-
-    spreadsheet_id = os.environ.get("SHEETS_SPREADSHEET_ID")
-    if not spreadsheet_id:
-        raise SheetSyncError("auth", "SHEETS_SPREADSHEET_ID environment variable not set")
-
-    return SheetsClient(service, spreadsheet_id)
