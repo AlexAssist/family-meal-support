@@ -94,7 +94,8 @@ def generate_grocery_list(
                 name=ingredient.name,  # preserve original casing
                 quantity=ingredient.quantity,
                 unit=ingredient.unit,
-                category=ingredient.category or GroceryCategory.OTHER,
+                category=ingredient.category if ingredient.category is not None
+                           else _categorize_ingredient(ingredient.name),
                 source_recipe=_source_recipe(normalized_name, plan, recipe_store),
             )
         )
@@ -219,3 +220,78 @@ def _category_for_staple(name: str) -> GroceryCategory:
         "sugar": GroceryCategory.PANTRY,
     }
     return mapping.get(name, GroceryCategory.OTHER)
+
+
+def _categorize_ingredient(name: str) -> GroceryCategory:
+    """Classify an ingredient by keyword matching against known category terms.
+
+    Used as fallback when an ingredient has no explicit category field set.
+    Checks against common ingredient names to classify into DAIRY, PRODUCE,
+    MEAT_SEAFOOD, BAKERY, PANTRY, CONDIMENTS, or OTHER.
+    """
+    n = name.lower()
+
+    # Meat / protein
+    if any(k in n for k in [
+        "chicken", "beef", "pork", "fish", "salmon", "shrimp", "bacon",
+        "sausage", "turkey", "ground", "steak", "tenderloin", "breast",
+        "thigh", "crab", "lobster", "scallop", "tilapia", "cod", "tuna",
+        "meat", "lamb", "veal", "ham", "pepperoni", "prosciutto",
+    ]):
+        return GroceryCategory.MEAT_SEAFOOD
+
+    # Dairy
+    if any(k in n for k in [
+        "milk", "cream", "cheese", "butter", "yogurt", "sour cream",
+        "parmesan", "mozzarella", "cheddar", "ricotta", "feta", "brie",
+        "cream cheese", "half and half", "heavy cream", "buttermilk",
+    ]):
+        return GroceryCategory.DAIRY
+
+    # Produce
+    if any(k in n for k in [
+        "onion", "garlic", "pepper", "tomato", "lettuce", "spinach",
+        "carrot", "celery", "cucumber", "zucchini", "broccoli",
+        "cauliflower", "potato", "mushroom", "avocado", "lime", "lemon",
+        "orange", "ginger", "cilantro", "parsley", "basil", "thyme",
+        "rosemary", "sage", "mint", "chive", "scallion", "shallot",
+        "cabbage", "kale", "arugula", "bok choy", "corn", "peas", "bean",
+        "sprout", "jalapeño", "serrano", "habanero", "poblano", "bell pepper",
+        "mango", "pineapple", "strawberry", "blueberry", "raspberry",
+        "apple", "pear", "peach", "plum", "banana", "grape", "melon",
+        "coconut", "garlic clove", "cilantro", "green onion",
+    ]):
+        return GroceryCategory.PRODUCE
+
+    # Bakery / bread
+    if any(k in n for k in [
+        "tortilla", "bread", "bun", "roll", "pita", "naan", "bagel",
+        "croissant", "baguette", "focaccia", "ciabatta", "tortilla",
+    ]):
+        return GroceryCategory.BAKERY
+
+    # Condiments / sauces / oils
+    if any(k in n for k in [
+        "sauce", "oil", "vinegar", "soy sauce", "ketchup", "mustard",
+        "mayo", "mayonnaise", "hot sauce", "salsa", "hummus", "pesto",
+        "bbq", "teriyaki", "fish sauce", "worcestershire", "oyster sauce",
+        "sesame oil", "olive oil", "vegetable oil", "canola", "coconut oil",
+        "chili oil", "tahini", "sriracha", "hoisin", "plum sauce",
+        "curry paste", "red curry", "coconut milk",
+    ]):
+        return GroceryCategory.CONDIMENTS
+
+    # Pantry / dry goods
+    if any(k in n for k in [
+        "rice", "pasta", "noodle", "flour", "sugar", "salt", "pepper",
+        "spice", "cumin", "paprika", "cayenne", "turmeric", "cinnamon",
+        "nutmeg", "oregano", "bay leaf", "coriander", "cardamom",
+        "chickpea", "lentil", "bean", "canned", "tomato sauce",
+        "tomato paste", "broth", "stock", "honey", "maple syrup",
+        "cornstarch", "baking", "yeast", "breadcrumb", "cracker",
+        "nut", "almond", "walnut", "peanut", "cashew", "sesame seed",
+        "nori", "vinegar", "mirin", "sake", "shaoxing",
+    ]):
+        return GroceryCategory.PANTRY
+
+    return GroceryCategory.OTHER

@@ -146,8 +146,14 @@ class TestSheetsClientGrocery:
 
         tab = service._tabs["Grocery"]
         assert tab[0] == ["Done", "Item", "Qty", "Source"]
-        assert tab[1] == ["", "Pasta", "500g", ""]
-        assert tab[2] == ["true", "Chicken", "1kg", "Tacos"]
+        # Category headers are inserted when category changes, with a blank row between groups
+        assert tab[1][0] == ""  # category header row, first col empty
+        assert "PANTRY" in tab[1][1]  # category header contains category name
+        assert tab[2] == ["", "Pasta", "500g", ""]
+        assert tab[3] == [""] * 4  # blank separator between groups
+        assert tab[4][0] == ""
+        assert "MEAT" in tab[4][1]  # second category header
+        assert tab[5] == ["true", "Chicken", "1kg", "Tacos"]
 
     def test_read_checked_grocery_items(self) -> None:
         service = FakeSheetsService()

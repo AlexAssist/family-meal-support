@@ -140,7 +140,16 @@ class SheetsClient:
             self._clear_tab(tab_name)
 
             rows = [GROCERY_COLUMNS]
+            prev_category = None
             for item in grocery_list.items:
+                # Add category header row when category changes
+                if item.category != prev_category:
+                    if prev_category is not None:
+                        # Blank row between groups
+                        rows.append(["", "", "", ""])
+                    # Category header (bold via formatting, here just text)
+                    rows.append(["", f"━━ {item.category.value.upper()} ━━", "", ""])
+                    prev_category = item.category
                 rows.append([
                     "true" if item.checked else "",
                     item.name,
