@@ -141,7 +141,13 @@ class SheetsClient:
 
             rows = [GROCERY_COLUMNS]
             prev_category = None
+            prev_source = None
             for item in grocery_list.items:
+                # Add Staples section divider before first staple item
+                if item.source_recipe == "staples" and prev_source != "staples":
+                    rows.append(["", "", "", ""])
+                    rows.append(["", "━━ 🛒 STAPLES (always buy) ━━", "", ""])
+                    prev_category = None  # reset so we don't double-insert category header
                 # Add category header row when category changes
                 if item.category != prev_category:
                     if prev_category is not None:
@@ -156,6 +162,7 @@ class SheetsClient:
                     item.quantity or "",
                     item.source_recipe or "",
                 ])
+                prev_source = item.source_recipe
 
             range_name = f"{tab_name}!A1:D{len(rows)}"
             body = {"values": rows}

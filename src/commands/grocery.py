@@ -11,7 +11,7 @@ from grocery.generate import generate_grocery_list
 from meal_plan import MealPlan
 from obsidian.vault import read_meal_plan
 from obsidian.recipes import ObsidianRecipeStore
-from pantry.inventory import read_pantry, read_staples
+from pantry.inventory import read_pantry, read_staples_file
 from sheets import SheetsAuth, SheetsClient
 from shared.errors import SheetSyncError
 
@@ -66,7 +66,8 @@ def _build_grocery_list(
 
     pantry = read_pantry(pantry_file)
     store = ObsidianRecipeStore(vault / "reference" / "meal-planning" / "meals")
-    staples = read_staples(pantry_file)
+    staples_file = vault / "reference" / "grocery-lists" / "staples.md"
+    staples = read_staples_file(staples_file)
     grocery_list = generate_grocery_list(plan, pantry, store, staples=staples)
     return plan, grocery_list.items
 

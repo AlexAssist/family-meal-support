@@ -103,6 +103,43 @@ def read_staples(pantry_file: Path) -> list[str]:
         if name:
             staples.append(name.lower())
 
+
+
+def read_staples_file(staples_file: Path) -> list[str]:
+    """Read staples from a dedicated staples.md file.
+
+    Staples are items you always want to buy each week (e.g., milk, cheese, bread)
+    unless they are already in the pantry. The file format is the same as pantry:
+    emoji-prefixed category headers with bullet items.
+
+    Returns a flat list of staple item names (category ignored for staples).
+    """
+    if not staples_file.exists():
+        return []
+
+    text = staples_file.read_text()
+    staples: list[str] = []
+
+    for line in text.split("\n"):
+        line = line.strip()
+
+        # Skip category headers (they start with ##)
+        if line.startswith("## "):
+            continue
+
+        # Skip non-bullet lines
+        if not line.startswith("- "):
+            continue
+
+        raw = line[2:].strip()
+        # Remove quantity in parens: "Milk (2L)" → "Milk"
+        name = re.sub(r"\s*\([^)]*\)\s*$", "", raw).strip()
+        if name:
+            staples.append(name.lower())
+
+    return staples
+
+
     return staples
 
 
