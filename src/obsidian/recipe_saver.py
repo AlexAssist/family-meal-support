@@ -17,7 +17,12 @@ from datetime import date
 from shared.types import Recipe, Ingredient
 
 
-def save_recipe(candidate: RecipeCandidate, vault: Path) -> Recipe:
+def save_recipe(
+    candidate: RecipeCandidate,
+    vault: Path,
+    *,
+    postfix: str | None = None,
+) -> Recipe:
     """Save a recipe candidate to the meals collection.
 
     Fetches the source URL, parses it for a clean recipe structure,
@@ -51,7 +56,10 @@ def save_recipe(candidate: RecipeCandidate, vault: Path) -> Recipe:
     meals_dir = vault / "reference" / "meal-planning" / "meals"
     meals_dir.mkdir(parents=True, exist_ok=True)
 
+    # Build slug and apply postfix
     slug = _slugify(recipe_data["name"])
+    if postfix:
+        slug = f"{slug}-{postfix}"
     file_path = meals_dir / f"{slug}.md"
 
     # Handle name collision
@@ -89,6 +97,23 @@ def _slugify(name: str) -> str:
     name = re.sub(r"[^a-z0-9\s]", "", name)
     name = re.sub(r"\s+", "-", name)
     return name.strip("-")
+
+
+def _url_to_postfix(url: str) -> str:
+    """Derive a short postfix from a URL to differentiate saved recipes.
+
+    Uses the domain hostname only — e.g. www.allrecipes.com → allrecipes,
+    budgetbytes.com → budgetbytes. If no hostname, returns "recipe".
+    """
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    host = parsed.netloc
+    # Strip 'www.' prefix if present
+    if host.startswith("www."):
+        host = host[4:]
+    # Take the first segment before any dot
+    segment = host.split(".")[0] if host else ""
+    return segment if segment else "recipe"
 
 
 def _fetch_page(url: str) -> str:

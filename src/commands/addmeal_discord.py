@@ -26,7 +26,7 @@ from typing import Literal
 from commands.addmeal import parse_day, add_meal_to_plan
 from obsidian.vault import read_meal_plan, write_meal_plan
 from obsidian.recipeStore import ObsidianRecipeStore
-from obsidian.recipe_saver import save_recipe, RecipeSaveError
+from obsidian.recipe_saver import save_recipe, RecipeSaveError, _url_to_postfix
 from recipes.discovery import discover_recipe, RecipeCandidate
 from recipes.lookup import find_recipe, RecipeNotFoundError, MultipleCandidatesError
 
@@ -178,9 +178,13 @@ def _handle_discovery_reply(
 
     selected = candidates[index]
 
+    # Extract a short postfix from the source URL to differentiate
+    # saved recipes from the same source domain.
+    postfix = _url_to_postfix(selected.source_url)
+
     # Save recipe to vault
     try:
-        saved_recipe = save_recipe(selected, vault)
+        saved_recipe = save_recipe(selected, vault, postfix=postfix)
     except RecipeSaveError as e:
         return f"Failed to save recipe: {e}. Please try again or add manually."
 

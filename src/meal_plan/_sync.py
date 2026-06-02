@@ -8,7 +8,9 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 from meal_plan import MealPlan
-from obsidian.vault import read_meal_plan, write_meal_plan
+from obsidian.vault import read_meal_plan, write_meal_plan, update_plan_meal_link
+from obsidian.recipe_saver import save_recipe, RecipeSaveError, _url_to_postfix
+from recipes.discovery import discover_recipe, set_search_cache, RecipeCandidate
 from sheets import SheetsClient
 
 # -------------------------------------------------------------------
@@ -166,7 +168,9 @@ def confirm_pull(
     """After user confirms a conflict, write the sheet plan to Obsidian.
 
     This writes the sheet_plan to Obsidian, then updates sync metadata
-    to reflect the pull completion.
+    to reflect the pull completion. For any PlannedMeal with a recipe_link
+    that has no corresponding file in meals/, the recipe is fetched and
+    saved so !grocery can pick it up.
     """
     plan_file = plans_dir / f"{sheet_plan.week_start.strftime('%Y-%m-%d')}.md"
     write_meal_plan(sheet_plan, plan_file)
@@ -181,8 +185,153 @@ def confirm_pull(
     )
     _save_meta(plans_dir, meta)
 
+    # Sync any recipe links that don't have a local file yet
+    _sync_missing_recipes(vault, sheet_plan)
+
+    # Check for meals without links that need discovery
+    discovery_result = _discover_and_prompt_recipes(vault, plan_file, sheet_plan)
+
     return SyncResult(
         success=True,
         message=f"Meal plan pulled from Google Sheets ({len(sheet_plan.days)} days)",
         days_synced=len(sheet_plan.days),
+    ), discovery_result
+
+
+def _discover_and_prompt_recipes(
+    vault: Path,
+    plan_file: Path,
+    plan: MealPlan,
+) -> _DiscoveryResult | None:
+    """Check for PlannedMeals without recipe_links, attempt discovery.
+
+    For each such meal, calls discover_recipe() (which reads from the
+    agent-populated search cache) and determines whether to auto-save
+    or surface to the user.
+
+    Returns a _DiscoveryResult if any discovery is needed (caller must
+    surface to user), or None if everything is resolved.
+
+    The agent is responsible for calling handle_discovery_reply() when
+    the user responds — this function only returns discovery state.
+    """
+    from commands.pending_discovery import start_discovery, get_pending_discovery
+
+    no_link_days = [d for d in plan.days if not d.recipe_link and d.recipe_name.strip()]
+    if not no_link_days:
+        return None
+
+    # Filter to days that don't already have a pending discovery
+    user_id = "303354486393667585"  # Jason
+    pending = get_pending_discovery(user_id)
+    pending_dates = {pending.day_date} if pending else set()
+    needs_discovery = [d for d in no_link_days if d.date.isoformat() not in pending_dates]
+    if not needs_discovery:
+        return None
+
+    # Attempt discovery for each — use the agent-populated cache
+    results_for_user: list[tuple[PlannedMeal, list[RecipeCandidate]]] = []
+    auto_save: list[tuple[PlannedMeal, RecipeCandidate]] = []
+
+    for day in needs_discovery:
+        candidates = discover_recipe(day.recipe_name)
+        if not candidates:
+            continue
+
+        top = candidates[0]
+        is_high_quality = any(
+            domain in top.source_url
+            for domain in ("allrecipes.com", "seriouseats.com", "bbcgoodfood.com")
+        )
+
+        # Auto-accept single high-quality candidates
+        if is_high_quality and len(candidates) == 1:
+            auto_save.append((day, top))
+        else:
+            results_for_user.append((day, candidates))
+
+    # Auto-save high-quality single candidates
+    for day, candidate in auto_save:
+        postfix = _url_to_postfix(candidate.source_url)
+        try:
+            saved = save_recipe(candidate, vault, postfix=postfix)
+            update_plan_meal_link(plan_file, day.date, saved.link or candidate.source_url)
+        except RecipeSaveError:
+            pass
+
+    # If everything auto-saved, nothing needs user input
+    if not results_for_user:
+        return None
+
+    # Surface ambiguous results to user — use the first pending meal
+    first_day, first_candidates = results_for_user[0]
+    prompt = start_discovery(
+        user_id=user_id,
+        plan_file=plan_file,
+        vault=vault,
+        day_date=first_day.date,
+        meal_name=first_day.recipe_name,
+        candidates=first_candidates,
     )
+
+    return _DiscoveryResult(
+        prompt=prompt,
+        plan_file=plan_file,
+        day_date=first_day.date,
+        meal_name=first_day.recipe_name,
+    )
+
+
+@dataclass
+class _DiscoveryResult:
+    """Result of _discover_and_prompt_recipes — agent must surface to user."""
+    prompt: str
+    plan_file: Path
+    day_date: date
+    meal_name: str
+
+
+def _sync_missing_recipes(vault: Path, plan: MealPlan) -> list[str]:
+    """Fetch and save recipes for any PlannedMeal with a recipe_link but no local file.
+
+    Returns a list of recipe names that were saved.
+    """
+    from recipes.discovery import RecipeCandidate
+
+    saved: list[str] = []
+    meals_dir = vault / "reference" / "meal-planning" / "meals"
+
+    for day in plan.days:
+        if not day.recipe_link:
+            continue
+
+        postfix = _url_to_postfix(day.recipe_link)
+        slug = _slugify_recipe_name(day.recipe_name)
+        filename = f"{slug}-{postfix}.md"
+
+        if (meals_dir / filename).exists():
+            continue
+
+        # Construct a RecipeCandidate and save it
+        candidate = RecipeCandidate(
+            name=day.recipe_name,
+            description="",
+            source_url=day.recipe_link,
+        )
+        try:
+            save_recipe(candidate, vault, postfix=postfix)
+            saved.append(day.recipe_name)
+        except RecipeSaveError:
+            # Log but don't fail the whole pull
+            pass
+
+    return saved
+
+
+def _slugify_recipe_name(name: str) -> str:
+    """Convert a recipe name to the same kebab-case slug used by save_recipe."""
+    import re
+    name = name.lower()
+    name = re.sub(r"[^a-z0-9\s]", "", name)
+    name = re.sub(r"\s+", "-", name)
+    return name.strip("-")

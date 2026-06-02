@@ -13,8 +13,7 @@ Private internals (not exposed to callers):
 from __future__ import annotations
 
 import re
-import urllib.parse
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date
 
 # Type for a discovered recipe candidate
@@ -37,8 +36,13 @@ def discover_recipe(name: str) -> list[RecipeCandidate]:
 
     Returns up to 3 ranked candidates. Returns empty list if search fails
     completely (no network, all results rejected, etc.).
+
+    Note: Network search is delegated to the parent agent via the
+    `web_search` tool. The parent agent should call `web_search_discovery()`
+    (defined at module level) to populate cache before calling this, or
+    this will fall back to a local-only scan.
     """
-    raw_results = _search_web(name)
+    raw_results = _search_web(name) or _search_local(name)
     if not raw_results:
         return []
 
@@ -49,34 +53,45 @@ def discover_recipe(name: str) -> list[RecipeCandidate]:
     return _rank_candidates(candidates, name)
 
 
+def _search_local(name: str) -> list[dict]:
+    """Local-only fallback: returns empty list.
+
+    The parent agent can inject cached results by calling
+    `set_search_cache(query, results)` before `discover_recipe()`.
+    """
+    return []
+
+
+def set_search_cache(query: str, results: list[dict]) -> None:
+    """Inject web search results into the module-level cache.
+
+    Called by the parent agent after running `web_search` so that
+    `discover_recipe()` picks up the results without making its own
+    network call.
+
+    Args:
+        query: The search query (normalized, lowercase).
+        results: List of dicts with keys: title, url, description.
+    """
+    global _search_cache
+    _search_cache[query.lower().strip()] = results
+
+
+_search_cache: dict[str, list[dict]] = {}
+
+
 # -------------------------------------------------------------------
 # Private — web search
 # -------------------------------------------------------------------
 
 def _search_web(name: str) -> list[dict]:
-    """Perform a web search and return raw result dicts.
+    """Return cached web search results if available, else empty list.
 
-    Uses DuckDuckGo HTML (no API key required).
-    Returns list of dicts with keys: title, url, description.
+    The parent agent calls `set_search_cache(query, results)` after running
+    `web_search` for a recipe discovery. This function returns the cached
+    results or an empty list (no independent web call).
     """
-    try:
-        import requests
-
-        query = urllib.parse.quote(name)
-        url = f"https://duckduckgo.com/html/?q={query}+recipe"
-
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            )
-        }
-        resp = requests.get(url, headers=headers, timeout=10)
-        resp.raise_for_status()
-        return _parse_ddg_html(resp.text)
-    except Exception:
-        return []
+    return _search_cache.get(name.lower().strip(), [])
 
 
 def _parse_ddg_html(html: str) -> list[dict]:

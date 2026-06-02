@@ -18,6 +18,8 @@ from meal_plan._sync import (
     sync_push,
     sync_pull,
     confirm_pull,
+    _sync_missing_recipes,
+    _slugify_recipe_name,
 )
 
 
@@ -175,7 +177,7 @@ class TestSyncPull:
                 PlannedMeal(date=date(2026, 5, 4), recipe_name="Tacos"),
             ])
 
-            result = confirm_pull(vault, plans_dir, client, sheet_plan)
+            result, _discovery = confirm_pull(vault, plans_dir, client, sheet_plan)
 
             assert result.success
             # Verify file was written
@@ -183,3 +185,117 @@ class TestSyncPull:
             assert plan_file.exists()
             content = plan_file.read_text()
             assert "Tacos" in content
+
+
+class TestRecipeSync:
+    """Recipe sync: PlannedMeals with recipe_links are saved to meals/ on pull."""
+
+    def test_confirm_pull_saves_recipe_file_from_link(self, monkeypatch) -> None:
+        """When a PlannedMeal has a recipe_link, the recipe is fetched and saved."""
+        mock_html = """
+        <html><head><script type="application/ld+json">
+        {"@type":"Recipe","name":"Chicken Tacos",
+         "recipeIngredient":["1 lb chicken","8 tortillas","1 cup salsa"],
+         "nutrition":{"calories":"420 kcal","proteinContent":"35g"}}
+        </script></head></html>
+        """
+        monkeypatch.setattr("obsidian.recipe_saver._fetch_page", lambda url: mock_html)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            vault = Path(tmpdir)
+            plans_dir = vault / "plans"
+            plans_dir.mkdir()
+
+            client = FakeSheetsClient()
+            sheet_plan = MealPlan(week_start=date(2026, 5, 4), days=[
+                PlannedMeal(
+                    date=date(2026, 5, 4),
+                    recipe_name="Chicken Tacos",
+                    recipe_link="https://www.allrecipes.com/chicken-tacos",
+                ),
+            ])
+
+            result, discovery_result = confirm_pull(vault, plans_dir, client, sheet_plan)
+
+            assert result.success
+            # Recipe file should exist
+            meals_dir = vault / "reference" / "meal-planning" / "meals"
+            assert meals_dir.exists()
+            recipe_files = list(meals_dir.glob("*.md"))
+            assert len(recipe_files) == 1
+            assert "chicken-tacos-allrecipes" in recipe_files[0].name
+            content = recipe_files[0].read_text()
+            assert "Chicken Tacos" in content
+            assert "chicken" in content.lower()
+
+    def test_confirm_pull_skips_recipe_already_in_meals(self, monkeypatch) -> None:
+        """If the recipe file already exists, it is not re-fetched."""
+        fetch_calls: list[str] = []
+
+        def track_fetch(url: str) -> str:
+            fetch_calls.append(url)
+            return """<html><head><script type="application/ld+json">
+            {"@type":"Recipe","name":"Pasta",
+             "recipeIngredient":["pasta","sauce"]}
+            </script></head></html>"""
+
+        monkeypatch.setattr("obsidian.recipe_saver._fetch_page", track_fetch)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            vault = Path(tmpdir)
+            plans_dir = vault / "plans"
+            plans_dir.mkdir()
+
+            # Pre-create the recipe file
+            meals_dir = vault / "reference" / "meal-planning" / "meals"
+            meals_dir.mkdir(parents=True)
+            (meals_dir / "pasta-allrecipes.md").write_text("# Already there\n")
+
+            client = FakeSheetsClient()
+            sheet_plan = MealPlan(week_start=date(2026, 5, 4), days=[
+                PlannedMeal(
+                    date=date(2026, 5, 4),
+                    recipe_name="Pasta",
+                    recipe_link="https://www.allrecipes.com/pasta",
+                ),
+            ])
+
+            result, discovery_result = confirm_pull(vault, plans_dir, client, sheet_plan)
+
+            assert result.success
+            assert len(fetch_calls) == 0  # Not fetched — file already exists
+
+    def test_confirm_pull_continues_on_recipe_save_error(self, monkeypatch) -> None:
+        """If a recipe fails to save, the pull still succeeds."""
+        def fail_fetch(url: str) -> str:
+            raise Exception("Network error")
+
+        monkeypatch.setattr("obsidian.recipe_saver._fetch_page", fail_fetch)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            vault = Path(tmpdir)
+            plans_dir = vault / "plans"
+            plans_dir.mkdir()
+
+            client = FakeSheetsClient()
+            sheet_plan = MealPlan(week_start=date(2026, 5, 4), days=[
+                PlannedMeal(
+                    date=date(2026, 5, 4),
+                    recipe_name="Bad Recipe",
+                    recipe_link="https://example.com/bad",
+                ),
+            ])
+
+            result, discovery_result = confirm_pull(vault, plans_dir, client, sheet_plan)
+
+            # Pull itself still succeeds even if recipe fetch fails
+            assert result.success
+            plan_file = plans_dir / "2026-05-04.md"
+            assert plan_file.exists()
+
+    def test_slugify_recipe_name(self) -> None:
+        """_slugify_recipe_name produces kebab-case slugs matching save_recipe."""
+        assert _slugify_recipe_name("Chicken Tacos") == "chicken-tacos"
+        assert _slugify_recipe_name("Salmon Pasta Bake!") == "salmon-pasta-bake"
+        # Dashes are stripped (same as save_recipe's _slugify)
+        assert _slugify_recipe_name("Quick 15-Minute Chili") == "quick-15minute-chili"
