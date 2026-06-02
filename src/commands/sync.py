@@ -138,9 +138,21 @@ def handle_sync_discovery_reply(
 
     reply_msg, done = handle_discovery_reply(user_id, vault, message)
     if done:
-        # Check if there are more pending discoveries to surface
         _pending_discovery_result.pop(user_id, None)
-        # TODO: could iterate through remaining discovery results
+        # After saving/confirming one recipe, check if there are more pending
+        # discoveries to surface. Re-run discovery to pick up the next meal.
+        from meal_plan._sync import _discover_and_prompt_recipes
+        plan_file = vault / pending.plan_file_rel
+        # Re-read plan to get current state (link may have been updated)
+        from obsidian.vault import read_meal_plan
+        plan = read_meal_plan(plan_file)
+        if plan:
+            next_result = _discover_and_prompt_recipes(vault, plan_file, plan)
+            if next_result:
+                # Store the next pending and prepend to reply message
+                _pending_discovery_result[user_id] = next_result
+                return f"{reply_msg}\n\n{next_result.prompt}"
+        return reply_msg
     return reply_msg
 
 

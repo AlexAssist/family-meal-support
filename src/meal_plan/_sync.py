@@ -238,15 +238,9 @@ def _discover_and_prompt_recipes(
         if not candidates:
             continue
 
-        top = candidates[0]
-        is_high_quality = any(
-            domain in top.source_url
-            for domain in ("allrecipes.com", "seriouseats.com", "bbcgoodfood.com")
-        )
-
-        # Auto-accept single high-quality candidates
-        if is_high_quality and len(candidates) == 1:
-            auto_save.append((day, top))
+        # Auto-save single candidate results — user can correct via !addmeal if wrong
+        if len(candidates) == 1:
+            auto_save.append((day, candidates[0]))
         else:
             results_for_user.append((day, candidates))
 
