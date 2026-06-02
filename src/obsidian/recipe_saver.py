@@ -243,18 +243,48 @@ def _heuristic_parse(html: str, candidate: RecipeCandidate) -> dict:
 
     # Try to find an ingredients list
     ingredients: list[str] = []
-    ing_patterns = [
-        r'(?:ingredients|you\'ll need)[:\s]+(.*?)(?:\d+\s+(?:serving|cup|tbsp|tsp|tablespoon|teaspoon)|instructions|preparation)',
-    ]
-    for pattern in ing_patterns:
-        match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
-        if match:
-            raw = match.group(1)
-            # Extract bullet-like items
-            items = re.findall(r'(?:^|\n)\s*[-*]\s*(.+?)(?=\n[-*]|\n\n)', raw, re.DOTALL)
-            if items:
-                ingredients = [item.strip() for item in items if len(item.strip()) > 3]
-                break
+    # First try JSON-LD
+    jsonld = _extract_jsonld(html)
+    if jsonld:
+        if isinstance(jsonld, list):
+            for item in jsonld:
+                if 'Recipe' in str(item.get('@type', '')):
+                    ing = item.get('recipeIngredient', [])
+                    if ing:
+                        ingredients = [i.strip() for i in ing if i.strip() and len(i.strip()) > 3]
+                        return {"name": name, "ingredients": ingredients, "calories": None, "protein_g": None, "carbs_g": None, "fat_g": None}
+        elif jsonld.get('recipeIngredient'):
+            ingredients = [i.strip() for i in jsonld['recipeIngredient'] if i.strip() and len(i.strip()) > 3]
+
+    if ingredients:
+        return {"name": name, "ingredients": ingredients, "calories": None, "protein_g": None, "carbs_g": None, "fat_g": None}
+
+    # Heuristic: look for INGREDIENTS section in HTML
+    # Handle both <br> separated lists (Squarespace) and bullet-marked lists
+    ing_match = re.search(r'(?:INGREDIENTS|Ingredients|You\'ll need)[:\s]*(.*?)(?:INSTRUCTIONS|PREP|Step \d|NOTES|#block)', html, re.IGNORECASE | re.DOTALL)
+    if ing_match:
+        raw = ing_match.group(1)
+        # Split on <br> tags (Squarespace format)
+        items = re.split(r'<br\s*/?>', raw, flags=re.IGNORECASE)
+        ingredients = [
+            re.sub(r'<[^>]+>', '', item).strip()
+            for item in items
+            if len(re.sub(r'<[^>]+>', '', item).strip()) > 3
+        ]
+
+    if not ingredients:
+        # Fallback: try standard bullet/numbered list in text
+        ing_patterns = [
+            r'(?:ingredients|you\'ll need)[:\s]+(.*?)(?:instructions|preparation)',
+        ]
+        for pattern in ing_patterns:
+            match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+            if match:
+                raw = match.group(1)
+                items = re.findall(r'(?:^|\n)\s*[-*]\s*(.+?)(?=\n[-*]|\n\n)', raw, re.DOTALL)
+                if items:
+                    ingredients = [item.strip() for item in items if len(item.strip()) > 3]
+                    break
 
     return {
         "name": name,
