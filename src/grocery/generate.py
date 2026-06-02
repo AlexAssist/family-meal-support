@@ -5,7 +5,7 @@ All complexity (ingredient merge, pantry subtract, staples, grouping, sorting)
 lives behind it.
 """
 from __future__ import annotations
-
+import re
 from collections import defaultdict
 from dataclasses import replace
 
@@ -130,8 +130,52 @@ def generate_grocery_list(
 # -------------------------------------------------------------------
 
 def _normalize(name: str) -> str:
-    """Normalize an ingredient name for comparison (lowercase, stripped)."""
+    """Normalize an ingredient name for comparison (lowercase, stripped).
+
+    Strips price noise like '($0.05)', parenthetical notes like '(divided)',
+    unit prefixes (Tbsp, tsp, cup), and normalizes whitespace. Used for both
+    dedup across recipes and pantry matching.
+    """
+    # Remove price noise like ($0.30), ($0.05), 0.49
+    name = re.sub(r'\s*\([$]?[0-9]+(?:\.[0-9]+)?\)', '', name, flags=re.IGNORECASE)
+    # Remove parenthetical notes like (divided), (optional), (about 1 inch)
+    name = re.sub(r'\s*\([^)]*\)', '', name)
+    # Strip unit prefixes (but keep the rest of the quantity)
+    name = re.sub(r'^(Tbsp|tsp|Tablespoons?|Teaspoons?|Cup|Cups?|tbsp|ts)\s+', '', name, flags=re.IGNORECASE)
+    # Collapse multiple spaces
+    name = re.sub(r'\s+', ' ', name)
     return name.lower().strip()
+
+
+def _key_ingredients(name: str) -> frozenset[str]:
+    """Convert ingredient name to a semantic dedup key (frozenset of core words).
+
+    Used to detect duplicates across recipes where the same ingredient is described
+    differently (e.g., "garlic cloves (minced)" vs "cloves of garlic, minced").
+
+    - Strips price and parenthetical noise (same as _normalize)
+    - Removes determiners, prepositions, and quantity words
+    - Splits on non-alphanumeric characters
+    - Returns a frozenset of the remaining significant words
+    """
+    # Apply same noise removal as _normalize
+    name = re.sub(r'\s*\([$]?[0-9]+(?:\.[0-9]+)?\)', '', name, flags=re.IGNORECASE)
+    name = re.sub(r'\s*\([^)]*\)', '', name)
+    name = re.sub(r'^(Tbsp|tsp|Tablespoons?|Teaspoons?|Cup|Cups?|tbsp|ts)\s+', '', name, flags=re.IGNORECASE)
+    name = re.sub(r'\s+', ' ', name).lower().strip()
+
+    # Split on non-alphanumeric
+    words = re.split(r'[^a-z0-9]+', name)
+
+    # Core ingredient words (removing common noise)
+    noise = {
+        'and', 'or', 'of', 'the', 'a', 'an', 'with', 'for', 'to',
+        'finely', 'roughly', 'small', 'large', 'medium',
+        'diced', 'minced', 'chopped', 'sliced', 'crushed',
+        'fresh', 'dried', 'ground', 'whole', 'half',
+        'plus', 'more', 'optional',
+    }
+    return frozenset(w for w in words if len(w) > 1 and w not in noise)
 
 
 def _merge_ingredients(
@@ -139,13 +183,25 @@ def _merge_ingredients(
 ) -> list[tuple[str, Ingredient]]:
     """Merge ingredients with the same normalized name.
 
-    When the same ingredient appears in multiple recipes, the quantities
-    are NOT combined (we don't have a reliable unit system). The first
-    ingredient's data is kept.
+    When the same ingredient appears in multiple recipes with different
+    descriptions (e.g., "garlic cloves (minced)" vs "cloves of garlic, minced"),
+    they are merged via semantic key matching — keeping the first seen.
     """
     seen: dict[str, Ingredient] = {}
     for normalized, ingredient in ingredients:
-        if normalized not in seen:
+        if normalized in seen:
+            continue
+        # Check semantic collision: if any previously seen ingredient has
+        # an overlapping word set, treat as duplicate
+        item_key = _key_ingredients(normalized)
+        duplicate = False
+        for existing_norm, _ in seen.items():
+            existing_key = _key_ingredients(existing_norm)
+            # If keys share significant words, merge
+            if item_key & existing_key:
+                duplicate = True
+                break
+        if not duplicate:
             seen[normalized] = ingredient
     return list(seen.items())
 
