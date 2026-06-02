@@ -89,13 +89,18 @@ def generate_grocery_list(
     # 5. Build GroceryItem list
     items: list[GroceryItem] = []
     for normalized_name, ingredient in filtered:
+        # Clean the ingredient name for display (remove prep adjectives)
+        clean_name = _clean_ingredient_name(ingredient.name)
+        if clean_name is None:
+            # Skip purely numeric / noise entries (nutrition lines, etc.)
+            continue
         items.append(
             GroceryItem(
-                name=ingredient.name,  # preserve original casing
-                quantity=ingredient.quantity,
-                unit=ingredient.unit,
+                name=clean_name,
+                quantity=None,  # quantities aren't reliable; show clean ingredient only
+                unit=None,
                 category=ingredient.category if ingredient.category is not None
-                           else _categorize_ingredient(ingredient.name),
+                           else _categorize_ingredient(clean_name),
                 source_recipe=_source_recipe(normalized_name, plan, recipe_store),
             )
         )
@@ -147,6 +152,124 @@ def _normalize(name: str) -> str:
     return name.lower().strip()
 
 
+def _clean_ingredient_name(name: str) -> str | None:
+    """Strip preparation adjectives for clean grocery display.
+
+    Removes: price noise, unit/quantity prefixes, preparation descriptors,
+    trailing noise, and parenthetical content. Returns None to skip pure noise.
+    """
+    # Remove price patterns first
+    name = re.sub(r'\$[0-9]+(?:\.[0-9]+)?', '', name)
+
+    # Step 1: Remove leading unit patterns (with or without quantity prefix)
+    for q in [
+        r'^[0-9]+(?:\s*/\s*[0-9]+)?\s*(?:cups?|c)\s+',           # 2 cups, 1/2 cups
+        r'^(?:cups?|c)\s+',                                          # bare cups, c
+        r'^[0-9]+(?:\s*/\s*[0-9]+)?\s*(?:tbsp|tablespoons?)\s+', # 1 tbsp
+        r'^(?:tbsp|tablespoons?)\s+',                                # bare tbsp
+        r'^[0-9]+(?:\s*/\s*[0-9]+)?\s*(?:tsp|teaspoons?)\s+',    # 1 tsp
+        r'^(?:tsp|teaspoons?)\s+',                                   # bare tsp
+        r'^(?:oz|ounce|ounces)\s+',                                 # oz, ounce
+        r'^[0-9]+(?:\s*/\s*[0-9]+)?\s*(?:pounds?|lbs?)\s+',       # 1 pound
+        r'^(?:handful|bunch)\s+',                                    # handful, bunch
+        r'^(?:can|cans|jar|jars?|bottle|bottles?|package|packages?)\s+',  # can, jar
+        r'^(?:sheet|sheets|piece|pieces|slice|slices)\s+',           # sheet, piece, slice
+        r'^(?:box|boxes)\s+',                                       # box of, boxes of
+        r'^[0-9]+-[a-z]+\s+',                                   # "6-inch tortillas" → strip prefix
+        r'^lb\.?\s+',                                               # "lb. chicken breast" → "chicken breast"
+        r'^lbs?\.?\s+',                                            # "lbs. chicken breast" → "chicken breast"
+    ]:
+        name = re.sub(q, '', name, flags=re.IGNORECASE)
+
+    # Strip common size descriptors like "6-inch", "8-inch", etc. before step 2
+    name = re.sub(r'^[0-9]+-[a-z]+\s+', '', name, flags=re.IGNORECASE)
+
+    # Remove trailing "any color" type phrases
+    name = re.sub(r'\s+,?\s*any\s+color\s*$', '', name, flags=re.IGNORECASE)
+    name = re.sub(r'\s+,?\s*small\s*$', '', name, flags=re.IGNORECASE)
+    name = re.sub(r'\s+,?\s*(?:optional|about|approx)\s+.*$', '', name, flags=re.IGNORECASE)
+
+    # Step 2: Remove leading preposition "of" (from "can of X", "box of X")
+    name = re.sub(r'^of\s+', '', name, flags=re.IGNORECASE)
+
+    # Step 3: Remove preparation descriptors at the start (includes "chopped" at start)
+    for p in [
+        r'^steamed\s+', r'^diced\s+', r'^minced\s+', r'^chopped\s+',
+        r'^sliced\s+', r'^crushed\s+', r'^cubed\s+', r'^shredded\s+',
+        r'^grated\s+', r'^thinly\s+', r'^roughly\s+', r'^finely\s+',
+        r'^small\s+', r'^large\s+', r'^medium\s+',
+        r'^fresh\s+', r'^dried\s+', r'^cold\s+', r'^warm\s+',
+        r'^softened\s+', r'^melted\s+',
+        r'^leaf\s+', r'^head\s+', r'^sprig\s+', r'^stalk\s+',
+        r'^piece\s+', r'^pieces\s+',
+    ]:
+        name = re.sub(p, '', name, flags=re.IGNORECASE)
+
+    # Step 4: Remove trailing descriptors (single words AND compounds, with leading whitespace)
+    # Do compounds first to avoid partial matches leaving ghost words.
+    # (?:^|\s+) matches start of string OR whitespace before the pattern,
+    # so patterns work both at string start and after a preceding word.
+    for t in [
+        # Compound trailing: "chopped matchstick carrots", "diced English cucumber"
+        r'(?:^|\s+)chopped\s+matchstick\s+carrots?\s*$',
+        r'(?:^|\s+)diced\s+(?:English\s+)?cucumber\s*$',
+        r'(?:^|\s+)minced\s+finely$',
+        r'(?:^|\s+)diced\s+finely$',
+        r'(?:^|\s+)chopped\s+finely$',
+        r'\s+for garnish$', r'\s+to serve$', r'\s+garnish$',
+        r'\s+or\s+.*$',
+    ]:
+        name = re.sub(t, '', name, flags=re.IGNORECASE)
+
+    # Step 5: Remove single-word trailing descriptors
+    for t in [
+        r'\s+diced$', r'\s+minced$', r'\s+sliced$', r'\s+chopped$',
+        r'\s+peeled$', r'\s+drained$', r'\s+rinse[ds]?$',
+        r'\s+cooked$', r'\s+steamed$', r'\s+baked$',
+        r'\s+roasted$', r'\s+fried$', r'\s+grilled$',
+        r'\s+ground$', r'\s+whole$',
+    ]:
+        name = re.sub(t, '', name, flags=re.IGNORECASE)
+
+    # Step 6: Now strip matchstick as standalone (already handled in compounds above)
+    name = re.sub(r'^matchstick\s+', '', name, flags=re.IGNORECASE)
+
+    # Step 7: Remove compound "diced finely" / "minced finely" patterns
+    name = re.sub(r'\s+diced\s+finely$', '', name, flags=re.IGNORECASE)
+    name = re.sub(r'\s+minced\s+finely$', '', name, flags=re.IGNORECASE)
+    name = re.sub(r'\s+chopped\s+finely$', '', name, flags=re.IGNORECASE)
+
+    # Step 8: Remove parenthetical content
+    name = re.sub(r'\s*\([^)]*\)', '', name)   # (for garnish, etc.)
+    name = re.sub(r'\s*\([^)]*$', '', name)      # unclosed (at end)
+
+    # Step 9: Clean up remaining pasta type names ("pipe rigate", "rigate")
+    name = re.sub(r'\b(?:pipe\s+)?rigate\b', '', name, flags=re.IGNORECASE)
+
+    # Step 10: Remove any commas and trailing punctuation
+    name = re.sub(r',\s*', ' ', name)   # commas → spaces
+    name = re.sub(r'\s+-$', '', name)            # trailing dash
+    name = re.sub(r'^\(*', '', name)             # leading open paren
+
+    # Step 11: Collapse whitespace and strip
+    name = re.sub(r'\s+', ' ', name).strip()
+
+    # Step 12: Skip purely numeric content (465, 554, etc.) or nutrition (10.0g, 15.0g)
+    if re.match(r'^[0-9]+(?:\.[0-9]+)?(?:\s*[a-z]+)?$', name, re.IGNORECASE):
+        return None
+    if re.match(r'^[0-9]+$', name):
+        return None
+
+    # Skip if too short or pure punctuation
+    if not name or len(name) <= 1 or re.match(r'^[0-9.,]+$', name):
+        return None
+
+    return name
+
+    # Final check: if name is empty or pure whitespace, skip entirely
+    if not name or not name.strip():
+        return None
+
 def _key_ingredients(name: str) -> frozenset[str]:
     """Convert ingredient name to a semantic dedup key (frozenset of core words).
 
@@ -174,6 +297,12 @@ def _key_ingredients(name: str) -> frozenset[str]:
         'diced', 'minced', 'chopped', 'sliced', 'crushed',
         'fresh', 'dried', 'ground', 'whole', 'half',
         'plus', 'more', 'optional',
+        'steamed', 'cooked', 'raw', 'baked', 'fried', 'roasted',
+        'peeled', 'cored', 'trimmed', 'sliced', 'diced',
+        'roughly', 'finely', 'thinly', 'lightly',
+        'about', 'inch', 'inches', 'piece', 'pieces',
+        'oz', 'ounce', 'ounces', 'can', 'cans', 'jar', 'jars',
+        'cup', 'cups', 'tbsp', 'tsp', 'tablespoon', 'teaspoon',
     }
     return frozenset(w for w in words if len(w) > 1 and w not in noise)
 
