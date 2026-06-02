@@ -10,7 +10,7 @@ from pathlib import Path
 from meal_plan import MealPlan
 from obsidian.vault import read_meal_plan, write_meal_plan, update_plan_meal_link
 from obsidian.recipe_saver import save_recipe, RecipeSaveError, _url_to_postfix
-from recipes.discovery import discover_recipe, set_search_cache, RecipeCandidate
+from recipes.discovery import RecipeCandidate, discover_recipe
 from sheets import SheetsClient
 
 # -------------------------------------------------------------------

@@ -130,7 +130,7 @@ class TestDiscoverRecipeIntegration:
         def mock_search(name):
             return mock_results
 
-        monkeypatch.setattr("recipes.discovery._search_web", mock_search)
+        monkeypatch.setattr("recipes.discovery.web_search_discovery", mock_search)
 
         candidates = discover_recipe("pasta primavera")
         assert len(candidates) <= 3
@@ -141,7 +141,7 @@ class TestDiscoverRecipeIntegration:
         def mock_search(name):
             return []  # Simulates network failure
 
-        monkeypatch.setattr("recipes.discovery._search_web", mock_search)
+        monkeypatch.setattr("recipes.discovery.web_search_discovery", mock_search)
 
         candidates = discover_recipe("nonexistent recipe xyz")
         assert candidates == []

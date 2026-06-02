@@ -3,18 +3,26 @@
 Public interface:
     discover_recipe(name: str) -> list[RecipeCandidate]
         Searches the web for the recipe name, returns up to 3 ranked candidates.
-        Returns empty list on complete failure (caller handles gracefully).
+        Returns empty list on complete failure (no network, etc.).
+
+    web_search_discovery(name: str) -> list[dict]
+        Performs a live Tavily web search for the recipe name.
+        Returns list of dicts with keys: title, url, description.
+        Calls Tavily API directly using the key from openclaw.json config.
 
 Private internals (not exposed to callers):
-    - _search_web() — raw search API call
+    - _load_tavily_key() — load API key from openclaw.json
     - _rank_candidates() — relevance + quality scoring
     - _parse_candidates() — extract candidates from search results
 """
 from __future__ import annotations
 
+import json
+import os
 import re
+import requests
 from dataclasses import dataclass
-from datetime import date
+from pathlib import Path
 
 # Type for a discovered recipe candidate
 @dataclass(frozen=True)
@@ -37,12 +45,16 @@ def discover_recipe(name: str) -> list[RecipeCandidate]:
     Returns up to 3 ranked candidates. Returns empty list if search fails
     completely (no network, all results rejected, etc.).
 
-    Note: Network search is delegated to the parent agent via the
-    `web_search` tool. The parent agent should call `web_search_discovery()`
-    (defined at module level) to populate cache before calling this, or
-    this will fall back to a local-only scan.
+    Tries live Tavily search first (via web_search_discovery), then falls
+    back to any cached results from a parent agent, then returns empty.
     """
-    raw_results = _search_web(name) or _search_local(name)
+    # Try live search first
+    raw_results = web_search_discovery(name)
+
+    if not raw_results:
+        # Fall back to parent-agent cache (set_search_cache)
+        raw_results = _search_cache.get(name.lower().strip(), [])
+
     if not raw_results:
         return []
 
@@ -53,13 +65,60 @@ def discover_recipe(name: str) -> list[RecipeCandidate]:
     return _rank_candidates(candidates, name)
 
 
-def _search_local(name: str) -> list[dict]:
-    """Local-only fallback: returns empty list.
+def web_search_discovery(name: str) -> list[dict]:
+    """Perform a live Tavily web search for recipe candidates.
 
-    The parent agent can inject cached results by calling
-    `set_search_cache(query, results)` before `discover_recipe()`.
+    Loads the Tavily API key from ~/.openclaw/openclaw.json and calls
+    the Tavily Search API directly.
+
+    Returns a list of dicts with keys: title, url, description.
+    Returns empty list on failure (network error, API error, etc.).
     """
-    return []
+    api_key = _load_tavily_key()
+    if not api_key:
+        return []
+
+    query = f"{name} recipe"
+    try:
+        response = requests.post(
+            "https://api.tavily.com/search",
+            json={"query": query, "api_key": api_key, "max_results": 5},
+            headers={"Content-Type": "application/json"},
+            timeout=15,
+        )
+        if response.status_code != 200:
+            return []
+        data = response.json()
+        results = data.get("results", [])
+        return [
+            {
+                "title": r.get("title", ""),
+                "url": r.get("url", ""),
+                "description": r.get("content", r.get("snippet", "")),
+            }
+            for r in results
+        ]
+    except Exception:
+        return []
+
+
+def _load_tavily_key() -> str | None:
+    """Load Tavily API key from openclaw.json config.
+
+    Searches ~/.openclaw/openclaw.json under
+    plugins.entries.tavily.config.webSearch.apiKey.
+
+    Returns None if not found or not readable.
+    """
+    config_path = Path.home() / ".openclaw" / "openclaw.json"
+    try:
+        data = json.loads(config_path.read_text())
+        entries = data.get("plugins", {}).get("entries", {})
+        tavily_cfg = entries.get("tavily", {}).get("config", {})
+        web_search = tavily_cfg.get("webSearch", {})
+        return web_search.get("apiKey") or None
+    except Exception:
+        return None
 
 
 def set_search_cache(query: str, results: list[dict]) -> None:
@@ -78,64 +137,6 @@ def set_search_cache(query: str, results: list[dict]) -> None:
 
 
 _search_cache: dict[str, list[dict]] = {}
-
-
-# -------------------------------------------------------------------
-# Private — web search
-# -------------------------------------------------------------------
-
-def _search_web(name: str) -> list[dict]:
-    """Return cached web search results if available, else empty list.
-
-    The parent agent calls `set_search_cache(query, results)` after running
-    `web_search` for a recipe discovery. This function returns the cached
-    results or an empty list (no independent web call).
-    """
-    return _search_cache.get(name.lower().strip(), [])
-
-
-def _parse_ddg_html(html: str) -> list[dict]:
-    """Parse DuckDuckGo HTML results page into structured dicts."""
-    results: list[dict] = []
-
-    # Each result is in a div with class "result"
-    result_blocks = re.findall(r'<div class="result[^"]*">(.*?)</div>\s*</div>', html, re.DOTALL)
-    for block in result_blocks[:10]:
-        title_match = re.search(r'<a class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', block, re.DOTALL)
-        snippet_match = re.search(r'<a class="result__snippet"[^>]*>(.*?)</a>', block, re.DOTALL)
-
-        if not title_match:
-            continue
-
-        url = title_match.group(1).strip()
-        title_raw = title_match.group(2).strip()
-        # Strip any HTML tags from title
-        title = re.sub(r'<[^>]+>', '', title_raw)
-
-        description = ""
-        if snippet_match:
-            description = re.sub(r'<[^>]+>', '', snippet_match.group(1)).strip()
-
-        # Skip non-recipe sites that are clearly not food
-        skip_patterns = [
-            "wikipedia.org",
-            "twitter.com",
-            "x.com",
-            "instagram.com",
-            "facebook.com",
-            "youtube.com",
-            "pinterest.com",
-        ]
-        if any(p in url.lower() for p in skip_patterns):
-            continue
-
-        results.append({
-            "title": title,
-            "url": url,
-            "description": description,
-        })
-
-    return results
 
 
 # -------------------------------------------------------------------

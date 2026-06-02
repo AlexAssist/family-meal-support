@@ -13,7 +13,7 @@ from sheets import SheetsAuth, SheetsClient
 from commands.pending_discovery import (
     get_pending_discovery,
     handle_discovery_reply,
-    clear_pending,
+    _clear_pending as clear_pending,
 )
 
 
