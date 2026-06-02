@@ -39,7 +39,11 @@ class SheetsAuth:
 
         creds = None
         if TOKEN_PATH.exists():
-            cred_data = json.loads(TOKEN_PATH.read_text())
+            cred_raw = TOKEN_PATH.read_text()
+            cred_data = json.loads(cred_raw)
+            # Handle double-encoded tokens (bug in some earlier save paths)
+            if isinstance(cred_data, str):
+                cred_data = json.loads(cred_data)
             from google.oauth2.credentials import Credentials
             creds = Credentials.from_authorized_user_info(cred_data, SCOPES)
 

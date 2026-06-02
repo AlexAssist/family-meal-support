@@ -25,7 +25,7 @@ from typing import Literal
 
 from commands.addmeal import parse_day, add_meal_to_plan
 from obsidian.vault import read_meal_plan, write_meal_plan
-from obsidian.recipeStore import ObsidianRecipeStore
+from obsidian.recipes import ObsidianRecipeStore
 from obsidian.recipe_saver import save_recipe, RecipeSaveError, _url_to_postfix
 from recipes.discovery import discover_recipe, RecipeCandidate
 from recipes.lookup import find_recipe, RecipeNotFoundError, MultipleCandidatesError

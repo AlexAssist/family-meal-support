@@ -20,7 +20,7 @@ from shared.types import (
     PlannedMeal,
     Recipe,
 )
-from recipes.lookup import RecipeStore
+from recipes.lookup import RecipeStore, find_recipe, RecipeNotFoundError, MultipleCandidatesError
 
 
 # -------------------------------------------------------------------
@@ -62,8 +62,10 @@ def generate_grocery_list(
     for meal in plan.days:
         if not meal.recipe_name.strip():
             continue
-        recipe = recipe_store.get(meal.recipe_name.lower())
-        if recipe is None:
+        try:
+            recipe = find_recipe(meal.recipe_name, recipe_store)
+        except (RecipeNotFoundError, MultipleCandidatesError):
+            # No matching recipe file (or multiple ambiguous matches) — skip gracefully
             continue
         for ingredient in recipe.ingredients:
             normalized = _normalize(ingredient.name)
@@ -156,8 +158,9 @@ def _source_recipe(
     for meal in plan.days:
         if not meal.recipe_name.strip():
             continue
-        recipe = recipe_store.get(meal.recipe_name.lower())
-        if recipe is None:
+        try:
+            recipe = find_recipe(meal.recipe_name, recipe_store)
+        except (RecipeNotFoundError, MultipleCandidatesError):
             continue
         for ing in recipe.ingredients:
             if _normalize(ing.name) == normalized_name:

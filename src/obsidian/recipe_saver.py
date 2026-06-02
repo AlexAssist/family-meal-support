@@ -158,7 +158,13 @@ def _extract_jsonld(html: str) -> dict | None:
             import json
             data = json.loads(match.group(1))
 
-            # Handle arrays
+            # Handle @graph arrays (schema.org commonly wraps types this way)
+            if isinstance(data, dict) and "@graph" in data:
+                for item in data["@graph"]:
+                    if _is_recipe(item):
+                        return _normalize_jsonld(item)
+
+            # Handle arrays at top level
             if isinstance(data, list):
                 for item in data:
                     if _is_recipe(item):
